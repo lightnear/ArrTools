@@ -14,8 +14,9 @@ with open('./sonarr_backup.csv', 'w', newline='') as csvfile:
     url = "{}/api/series".format(baseurl)
     rsp = requests.get(url , headers=headers)
     if rsp.status_code == 200:
+        csvwriter.writerow(['title','year','imdbId','tvdbId','rootFolderPath','profileId'])
         RadarrData = json.loads(rsp.text)
-        for d in RadarrData: csvwriter.writerow([d['title'],d['year'], d.get('imdbId')])
+        for d in RadarrData: csvwriter.writerow([d['title'],d['year'], d.get('imdbId'),d.get('tvdbId'),d.get('path')[0:d.get('path').rindex('/')+1],d.get('profileId')])
     else:
         print("Failed to connect to Radar...")
 print("Done...")

@@ -53,39 +53,36 @@ log = logging.getLogger("app." + __name__)
 
 ########################################################################################################################
 
-def add_show(title,year,imdbid):
+def add_show(title,year,imdbid,tvdbid,rootFolderPath,profileId):
     
     # Add Missing to sonarr Work in Progress
     global show_added_count
     global show_exist_count
-    if imdbid == None : imdbid = get_imdbid(title,year)
-    if imdbid == None : log.info("Not imdbid found for {}".format(title)); return
-    imdbIds = []
+    # if imdbid == None : imdbid = get_imdbid(title,year)
+    # if imdbid == None : log.info("Not imdbid found for {}".format(title)); return
+    # imdbIds = []
     tvdbIds = []
-    for shows_to_add in sonarrData:  imdbIds.append(shows_to_add.get('imdbId'))
+    # for shows_to_add in sonarrData:  imdbIds.append(shows_to_add.get('imdbId'))
     for shows_to_add in sonarrData:  tvdbIds.append(shows_to_add.get('tvdbId'))
    
-    if imdbid not in imdbIds:
-        tvdbId = get_tvdbId(title,imdbid)
-        if tvdbId in tvdbIds: 
-            show_exist_count +=1
-            log.info("\033[1;36m{}\t {} ({}) already Exists in Sonarr.\u001b[0m".format(imdbid,title,year))
-            return
+    if tvdbid not in tvdbIds:
         session = requests.Session()
         adapter = requests.adapters.HTTPAdapter(max_retries=20)
         session.mount('https://', adapter)
         session.mount('http://', adapter) 
 
-        if tvdbId == None: log.error("No tvdbId found for {}".format(title)); return
-        if not qualityProfileId.isdigit(): 
-            ProfileId = get_profile_from_id(qualityProfileId)
-        elif qualityProfileId == None: 
-            log.error("\u001b[35m qualityProfileId Not Set in the config correctly.\u001b[0m")
-        else: 
-            ProfileId = qualityProfileId
+        if tvdbid == None or tvdbid == "": 
+            log.error("No tvdbId found for {} ({})".format(title,year))
+            return
+        # if not qualityProfileId.isdigit(): 
+        #     ProfileId = get_profile_from_id(qualityProfileId)
+        # elif qualityProfileId == None: 
+        #     log.error("\u001b[35m qualityProfileId Not Set in the config correctly.\u001b[0m")
+        # else: 
+        #     ProfileId = qualityProfileId
         
         headers = {"Content-type": "application/json"}
-        url = "{}{}/api/series/lookup?term=tvdb:{}&apikey={}".format(baseurl,urlbase,tvdbId, api_key )
+        url = "{}{}/api/series/lookup?term=tvdb:{}&apikey={}".format(baseurl,urlbase,tvdbid, api_key )
         rsp = session.get(url, headers=headers)
         data = json.loads(rsp.text)
         if rsp.text =="[]":
@@ -94,7 +91,7 @@ def add_show(title,year,imdbid):
         if len(rsp.text)==0: 
             log.error("Sorry. We couldn't find any Shows matching {} ({})".format(title,year))
             return 
-        tvdbId = data[0]["tvdbId"]
+        tvdbid = data[0]["tvdbId"]
         title = data[0]["title"]
         year = data[0]["year"]
         images = json.loads(json.dumps(data[0]["images"]))
@@ -104,12 +101,12 @@ def add_show(title,year,imdbid):
         data = json.dumps({
             "title": title ,
             "year": year ,
-            "tvdbId": tvdbId ,
+            "tvdbId": tvdbid ,
             "titleslug": titleslug,
             "monitored": 'true' ,
             "seasonFolder": 'true',
-            "qualityProfileId": ProfileId,
-            "rootFolderPath": rootfolderpath ,
+            "qualityProfileId": profileId,
+            "rootFolderPath": rootFolderPath ,
             "images": images,
             "seasons": seasons,
             "addOptions":
@@ -141,7 +138,7 @@ def add_show(title,year,imdbid):
     
     else:
         show_exist_count+=1
-        log.info("\033[1;36m{}\t {} ({}) already Exists in Sonarr.\u001b[0m".format(imdbid,title,year))
+        log.info("\033[1;36m{}\t {} ({}) already Exists in Sonarr.\u001b[0m".format(tvdbid,title,year))
         return
 
 def get_imdbid(title,year,imdbid):
@@ -218,11 +215,14 @@ def main():
 
         for row in s:
             if not (row): continue
-            if len(row) >= 4: log.error("Invalid Format on line {} Data:{}".format(str(s.line_num),row)); continue
+            if len(row) >= 7: log.error("Invalid Format on line {} Data:{}".format(str(s.line_num),row)); continue
             try: row['title']
             except: log.error("Invalid CSV File, Header does not contain title,year,imdbid"); sys.exit(-1)
-            title = row['title']; year = row['year']; imdbid = row['imdbid']
-            try: add_show(title,year,imdbid)
+            title = row['title']; year = row['year']; imdbid = row['imdbId']
+            tvdbid = int(row['tvdbId'])
+            rootFolderPath = row['rootFolderPath']
+            profileId = int(row['profileId'])
+            try: add_show(title,year,imdbid,tvdbid,rootFolderPath,profileId)
             except Exception as e: log.error(e); sys.exit(-1)
     log.info("Added {} of {} Shows, {} Already Exist".format(show_added_count,total_count,show_exist_count))
 

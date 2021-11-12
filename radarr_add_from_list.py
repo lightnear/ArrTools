@@ -14,8 +14,8 @@ baseurl = config['radarr']['baseurl']
 urlbase = config['radarr']['urlbase']
 api_key = config['radarr']['api_key']
 rootfolderpath = config['radarr']['rootfolderpath']
-searchForMovie = config['radarr']['searchForMovie']
-if searchForMovie is None: searchForMovie = 'False'
+# searchForMovie = config['radarr']['searchForMovie']
+# if searchForMovie is None or searchForMovie == "": searchForMovie = 'False'
 qualityProfileId = config['radarr']['qualityProfileId']
 omdbapi_key = config['radarr']['omdbapi_key']
 
@@ -54,54 +54,59 @@ log = logging.getLogger("app." + __name__)
 
 ########################################################################################################################
 
-def add_movie(title, year, imdbid):
+def add_movie(title, year, imdbid, tmdbid, rootFolderPath, qualityProfileId):
 	global movie_added_count
 	global movie_exist_count
 	global ProfileId
-
+	if tmdbid == None: log.error("Failed to get tmdbid for{} {}.".format(title,year)); return
+	if rootFolderPath == None: rootFolderPath = rootfolderpath
 	if year == "": year = get_year(imdbid)
-	if imdbid == None: imdbid = get_imdbid(title,year)
-	if imdbid == None: log.error("Failed to get imdbid for {} {}.".format(title,year)); return
+	# if imdbid == None: imdbid = get_imdbid(title,year)
+	# if imdbid == None: log.error("Failed to get imdbid for {} {}.".format(title,year)); return
 	
 	# Store Radarr Server imdbid for faster matching
 	movieIds = []
-	for movie_to_add in RadarrData: movieIds.append(movie_to_add.get('imdbId')) 
-	if imdbid not in movieIds:
-		# Build json Data to inport into radarr	
+	for movie_to_add in RadarrData: 
+		movieIds.append(movie_to_add.get('tmdbId')) 
+	if tmdbid not in movieIds:
+		# Build json Data to inport into radarr
 		session = requests.Session()
 		adapter = requests.adapters.HTTPAdapter(max_retries=20)
 		session.mount('https://', adapter)
 		session.mount('http://', adapter)
-		if not qualityProfileId.isdigit(): 
-			ProfileId = get_profile_from_id(qualityProfileId) 
-		elif qualityProfileId is None: 
-			log.error("\u001b[35m qualityProfileId Not Set in the config correctly.\u001b[0m"); sys.exit(-1)
-		elif match_profile_id(qualityProfileId) == True:
-			ProfileId = qualityProfileId
-		headers = {"Content-type": "application/json", 'Accept':'application/json'}
-		url = "{}{}/api/movie/lookup/imdb?imdbId={}&apikey={}".format(baseurl,urlbase, imdbid, api_key)
+		# if not qualityProfileId.isdigit(): 
+		# 	ProfileId = get_profile_from_id(qualityProfileId) 
+		# elif qualityProfileId is None: 
+		# 	log.error("\u001b[35m qualityProfileId Not Set in the config correctly.\u001b[0m"); sys.exit(-1)
+		# elif match_profile_id(qualityProfileId) == True:
+		# 	ProfileId = qualityProfileId
+		headers = {'Accept': 'application/json'}
+		url = "{}{}/api/v3/movie/lookup?term=tmdbId%3A{}&apikey={}".format(baseurl, urlbase, tmdbid, api_key)
 		rsp = session.get(url, headers=headers)
 		if len(rsp.text)==0: 
 			log.error("\u001b[35mSorry. We couldn't find any movies matching {} ({})\u001b[0m".format(title,year))
 			return 
 		if rsp.status_code == 200:
-			data = json.loads(rsp.text)
-			tmdbid = data["tmdbId"]
-			title = data["title"]
-			year = data['year']
+			data = json.loads(rsp.text)[0]
+			imdbid = data.get("imdbId")
+			tmdbid = data.get("tmdbId")
+			title = data.get("title")
+			year = data.get('year')
 			images = json.loads(json.dumps(data["images"]))
-			titleslug = data["titleSlug"]
+			titleslug = data.get("titleSlug")
 			Rdata = json.dumps({
 				"title": title , 
-				"qualityProfileId": ProfileId , 
+				"qualityProfileId": qualityProfileId , 
 				"year": year ,
+				"imdbId": imdbid,
 				"tmdbId": tmdbid ,
 				"titleslug":titleslug, 
-				"monitored": 'true' , 
-				"minimumAvailability": "released",
-				"rootFolderPath": rootfolderpath ,
-				"images": images,
-				"addOptions" : {"searchForMovie" : searchForMovie}})
+				"monitored": True , 
+				"minimumAvailability": "Announced",
+				"rootFolderPath": rootFolderPath,
+				"images": images
+				# "addOptions" : {"searchForMovie" : searchForMovie}
+				})
 		elif rsp.status_code == 404:
 			log.error("\u001b[36m{}\t \u001b[0m{} ({}) Not found, Not added to Radarr.".format(imdbid,title,year))
 			return
@@ -109,68 +114,23 @@ def add_movie(title, year, imdbid):
 			log.error("Something else has happend.")
 			return
 		# Add Movie To Radarr
-		headers = {"Content-type": "application/json", 'Accept':'application/json', "X-Api-Key": api_key}
-		url = '{}{}/api/movie'.format(baseurl,urlbase)
+		headers = {'Accept':'application/json', "X-Api-Key": api_key}
+		url = '{}{}/api/v3/movie'.format(baseurl,urlbase)
 		rsp = requests.post(url, headers=headers, data=Rdata)
 		if rsp.status_code == 201:
 			movie_added_count +=1
-			if searchForMovie == "True": # Check If you want to force download search
-				log.info("\u001b[36m{}\t \u001b[0m{} ({}) \u001b[32mAdded to Radarr :) \u001b[36;1mNow Searching.\u001b[0m".format(imdbid,title,year))
-			else:
-				log.info("\u001b[36m{}\t \u001b[0m{} ({}) \u001b[32mAdded to Radarr :) \u001b[31mSearch Disabled.\u001b[0m".format(imdbid,title,year))
-	
-	elif imdbid == None:
-		# Search by Movie Title in Radarr
-		url = "{}{}/api/movie/lookup?term={}&apikey={}".format(baseurl,urlbase, title.replace(" ","%20"), api_key)
-		rsp = requests.get(url, headers=headers)
-		data = json.loads(rsp.text)
-		if rsp.text =="[]":
-			log.error("\u001b[35mSorry. We couldn't find any movies matching {} ({})\u001b[0m".format(title,year))
-			return 
-		if rsp.status_code == 200:
-			tmdbid = data[0]["tmdbId"]
-			title = data[0]["title"]
-			year = data[0]['year']
-			images = json.loads(json.dumps(data[0]["images"]))
-			titleslug = data[0]["titleSlug"]
-			Rdata = json.dumps({
-				"title": title , 
-				"qualityProfileId": ProfileId , 
-				"year": year ,
-				"tmdbId": tmdbid ,
-				"titleslug":titleslug, 
-				"monitored": 'true' , 
-				"minimumAvailability": "released",
-				"rootFolderPath": rootfolderpath ,
-				"images": images,
-				"addOptions" : {"searchForMovie" : searchForMovie}
-				})
-			# Add Movie To Radarr
-			headers = {"Content-type": "application/json", 'Accept':'application/json', "X-Api-Key": api_key}
-			url = '{}{}/api/movie'.format(baseurl,urlbase)
-			rsp = requests.post(url, headers=headers, data=Rdata)
-			if rsp.status_code == 201:
-				movie_added_count +=1
-				if searchForMovie == "True": # Check If you want to force download search
-					log.info("\u001b[36mtm{}\t         \u001b[0m{} ({}) \u001b[32mAdded to Radarr :) \u001b[36;1mNow Searching.\u001b[0m".format(tmdbid,title,year))
-				else:
-					log.info("\u001b[36mtm{}\t         \u001b[0m{} ({}) \u001b[32mAdded to Radarr :) \u001b[31mSearch Disabled.\u001b[0m".format(tmdbid,title,year))
-			elif rsp.status_code == 400:
-				movie_exist_count +=1
-				log.info("\u001b[36mtm{}\t         \u001b[0m{} ({}) already Exists in Radarr.".format(tmdbid,title,year))
-				return
+			log.info("\u001b[36m{}\t \u001b[0m{} ({}) \u001b[32mAdded to Radarr :) ".format(tmdbid,title,year))
 		else:
-			log.error("\u001b[35m{}\t {} ({}) Not found, Not added to Radarr.\u001b[0m".format(imdbid,title,year))
-			return
+			log.error("\u001b[35m{}\t {} ({}) add failed, Not added to Radarr.\u001b[0m".format(tmdbid,title,year))
 	else:
 		movie_exist_count +=1
-		log.info("\u001b[36m{}\t \u001b[0m{} ({}) already Exists in Radarr.".format(imdbid,title,year))
+		log.info("\u001b[36m{}\t \u001b[0m{} ({}) already Exists in Radarr.".format(tmdbid,title,year))
 		return
 
 
 def get_profile_from_id(id): 
-    headers = {"Content-type": "application/json", "X-Api-Key": "{}".format(api_key)}
-    url = "{}{}/api/profile".format(baseurl,urlbase)
+    headers = {"Content-type": "application/json", 'Accept':'application/json'}
+    url = "{}{}/api/v3/qualityProfile?apikey={}".format(baseurl,urlbase,api_key)
     r = requests.get(url, headers=headers)
     d = json.loads(r.text)
     profile = next((item for item in d if item["name"].lower() == id.lower()), False)
@@ -180,8 +140,8 @@ def get_profile_from_id(id):
     return  profile.get('id')
 
 def match_profile_id(id): 
-    headers = {"Content-type": "application/json", "X-Api-Key": "{}".format(api_key)}
-    url = "{}{}/api/profile".format(baseurl,urlbase)
+    headers = {"Content-type": "application/json", 'Accept':'application/json'}
+    url = "{}{}/api/v3/qualityProfile?apikey={}".format(baseurl,urlbase,api_key)
     r = requests.get(url, headers=headers)
     d = json.loads(r.text)
     profile = next((item for item in d if item["name"].lower() == id.lower()), False)
@@ -228,8 +188,8 @@ def main():
 	if len(sys.argv)<2: log.error("No list Specified... Bye!!"); sys.exit(-1)
 	if not os.path.exists(sys.argv[1]): log.error("{} Does Not Exist".format(sys.argv[1])); sys.exit(-1)
 	log.info("Downloading Radarr Movie Data. :)")
-	headers = {"Content-type": "application/json", "X-Api-Key": api_key }
-	url = "{}{}/api/movie".format(baseurl,urlbase)
+	headers = {"Content-type": "application/json", 'Accept':'application/json'}
+	url = "{}{}/api/v3/movie?apikey={}".format(baseurl,urlbase,api_key)
 	rsp = requests.get(url , headers=headers)
 	if rsp.status_code == 200:
 		RadarrData = json.loads(rsp.text)
@@ -244,8 +204,9 @@ def main():
 			if not (row): continue
 			try: row['title']
 			except: log.error("Invalid CSV File, Header does not contain title,year,imdbid"); sys.exit(-1)
-			title = row['title']; year = row['year']; imdbid = row['imdbid']
-			try: add_movie(title, year,imdbid) 
+			title = row['title']; year = row['year']; imdbid = row['imdbId'] 
+			tmdbid = int(row['tmdbId']); rootFolderPath=row['rootFolderPath']; qualityProfileId=int(row['qualityProfileId'])
+			try: add_movie(title, year,imdbid, tmdbid, rootFolderPath, qualityProfileId) 
 			except Exception as e: log.error(e); sys.exit(-1)
 	log.info("Added {} of {} Movies, {} already exists. ;)".format(movie_added_count,total_count,movie_exist_count))
 
