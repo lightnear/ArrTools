@@ -41,7 +41,7 @@ logger.setLevel(logging.INFO)  # DEBUG To show all
 logger.setFormatter(formatter)
 logging.getLogger().addHandler(logger)
 if not os.path.exists("./logs/"):
-	os.mkdir("./logs/")
+    os.mkdir("./logs/")
 logFileName = "./logs/rafl.log"  # .format(datetime.now().strftime("%Y-%m-%d-%H.%M.%S"))
 filelogger = logging.handlers.RotatingFileHandler(filename=logFileName)
 filelogger.setLevel(logging.DEBUG)
@@ -82,7 +82,7 @@ def add_movie(title, year, imdbid, tmdbid, rootFolderPath, qualityProfileId):
         # 	log.error("\u001b[35m qualityProfileId Not Set in the config correctly.\u001b[0m"); sys.exit(-1)
         # elif match_profile_id(qualityProfileId) == True:
         # 	ProfileId = qualityProfileId
-        headers = {'Accept': 'application/json'}
+        headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
         url = "{}{}/api/v3/movie/lookup?term=tmdbId%3A{}&apikey={}".format(baseurl, urlbase, tmdbid, api_key)
         rsp = session.get(url, headers=headers)
         if len(rsp.text) == 0:
@@ -110,19 +110,22 @@ def add_movie(title, year, imdbid, tmdbid, rootFolderPath, qualityProfileId):
                 # "addOptions" : {"searchForMovie" : searchForMovie}
             })
         elif rsp.status_code == 404:
+            log.error(rsp.text)
             log.error("\u001b[36m{}\t \u001b[0m{} ({}) Not found, Not added to Radarr.".format(imdbid, title, year))
             return
         else:
             log.error("Something else has happend.")
+            log.error(rsp.text)
             return
         # Add Movie To Radarr
-        headers = {'Accept': 'application/json', "X-Api-Key": api_key}
+        headers = {'Accept': 'application/json', 'Content-Type': 'application/json', "X-Api-Key": api_key}
         url = '{}{}/api/v3/movie'.format(baseurl, urlbase)
         rsp = requests.post(url, headers=headers, data=Rdata)
         if rsp.status_code == 201:
             movie_added_count += 1
             log.info("\u001b[36m{}\t \u001b[0m{} ({}) \u001b[32mAdded to Radarr :) ".format(tmdbid, title, year))
         else:
+            log.error(rsp.text)
             log.error("\u001b[35m{}\t {} ({}) add failed, Not added to Radarr.\u001b[0m".format(tmdbid, title, year))
     else:
         movie_exist_count += 1
@@ -131,7 +134,7 @@ def add_movie(title, year, imdbid, tmdbid, rootFolderPath, qualityProfileId):
 
 
 def get_profile_from_id(id):
-    headers = {"Content-type": "application/json", 'Accept': 'application/json'}
+    headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
     url = "{}{}/api/v3/qualityProfile?apikey={}".format(baseurl, urlbase, api_key)
     r = requests.get(url, headers=headers)
     d = json.loads(r.text)
@@ -143,7 +146,7 @@ def get_profile_from_id(id):
 
 
 def match_profile_id(id):
-    headers = {"Content-type": "application/json", 'Accept': 'application/json'}
+    headers = {'Accept': 'application/json', 'Content-Type': 'application/json'}
     url = "{}{}/api/v3/qualityProfile?apikey={}".format(baseurl, urlbase, api_key)
     r = requests.get(url, headers=headers)
     d = json.loads(r.text)
@@ -216,10 +219,11 @@ def main():
             exit()
         log.info("Found {} Movies in {}. :)".format(total_count, sys.argv[1]))
         for row in m:
-            if not (row): continue
+            if not (row):
+                continue
             try:
                 row['title']
-            except:
+            except Exception:
                 log.error("Invalid CSV File, Header does not contain title,year,imdbid")
                 sys.exit(-1)
             title = row['title']
